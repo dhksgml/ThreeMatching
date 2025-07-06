@@ -2,8 +2,18 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum BlockType
+{
+    Red,
+    Blue,
+    Green,
+    Yellow,
+    Purple
+}
+
 public class Block : MonoBehaviour
 {
+    public BlockType type;
     public int x, y; //블록의 현재 위치
     private BoardManager boardManager;
     private SpriteRenderer sr;
