@@ -2,17 +2,28 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+public enum InputMode
+{
+    ClickToSelect,
+    DragToSwap
+}
+
 public class BoardManager : MonoBehaviour
 {
     public int width = 8;
     public int height = 8;
+    public float spacing = 0.1f;
     public GameObject[] blockPrefabs;    //생성할 타일 프리팹
     public Transform boardHolder;   //부모 오브젝트
 
     private Block[,] allBlocks;
     private Block selectedBlock = null;
+    public Block SelectedBlock => selectedBlock;
 
     private bool isProcessing = false; //연산 중 입력 잠금을 위한 변수
+    public bool IsProcessing => isProcessing;
+
+    public InputMode inputMode = InputMode.ClickToSelect;
 
     private void Start()
     {
@@ -28,22 +39,58 @@ public class BoardManager : MonoBehaviour
         {
             for (int y = 0; y < height; y++)
             {
-                int index = Random.Range(0, blockPrefabs.Length);
-                GameObject blockObj = Instantiate(blockPrefabs[index], Vector2.zero, Quaternion.identity);
-                blockObj.transform.parent = boardHolder;
+                int index;
+                BlockType selectedType;
+
+                do
+                {
+                    index = Random.Range(0, blockPrefabs.Length);
+                    selectedType = (BlockType)index;
+                }
+                while (HasMatchOnCreate(x, y, selectedType));
+
+                Vector2 spawnPos = new Vector2(x * (1 + spacing), y * (1 + spacing));
+                GameObject blockObj = Instantiate(blockPrefabs[index], spawnPos, Quaternion.identity, boardHolder);
 
                 Block block = blockObj.GetComponent<Block>();
-                block.type = (BlockType)index;
+                block.type = selectedType;
+                block.SetSpacing(spacing);
                 block.SetPosition(x, y);
                 allBlocks[x, y] = block;
             }
         }
     }
+
+    private bool HasMatchOnCreate(int x, int y, BlockType type)
+    {
+        // 가로 검사 (왼쪽 2칸)
+        if (x >= 2)
+        {
+            if (allBlocks[x - 1, y] != null && allBlocks[x - 2, y] != null)
+            {
+                if (allBlocks[x - 1, y].type == type && allBlocks[x - 2, y].type == type)
+                    return true;
+            }
+        }
+
+        // 세로 검사 (아래쪽 2칸)
+        if (y >= 2)
+        {
+            if (allBlocks[x, y - 1] != null && allBlocks[x, y - 2] != null)
+            {
+                if (allBlocks[x, y - 1].type == type && allBlocks[x, y - 2].type == type)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
     //카메라 보드 중심 정렬
     void CenterCamera()
     {
-        float camX = (width - 1) / 2f;
-        float camY = (height - 1) / 2f;
+        float camX = ((width - 1) * (1 + spacing)) / 2f;
+        float camY = ((height - 1) * (1 + spacing)) / 2f;
         Camera.main.transform.position = new Vector3(camX, camY, -10f);
     }
 
@@ -58,7 +105,7 @@ public class BoardManager : MonoBehaviour
 
     public void SelectBlock(Block block)
     {
-        if (isProcessing) return;
+        if (isProcessing || block == null || block.gameObject == null) return;
 
         if (selectedBlock == null)
         {
@@ -79,6 +126,14 @@ public class BoardManager : MonoBehaviour
                 block.Highlight(true);
             }
         }
+    }
+
+    public void CancelSelectedBlock()
+    {
+        if (isProcessing || selectedBlock == null || selectedBlock.gameObject == null) return;
+
+        selectedBlock.Highlight(false);
+        selectedBlock = null;
     }
 
     private IEnumerator SwapAndCheck(Block a, Block b)
@@ -126,29 +181,6 @@ public class BoardManager : MonoBehaviour
         //2. 배열에 바뀐 위치 적용
         allBlocks[a.x, a.y] = a;
         allBlocks[b.x, b.y] = b;
-
-        /*
-        //3. 매칭 검사
-        List<Block> matched = FindMatches();
-        if (matched.Count > 0)
-        {
-            //매칭 성공 시 매칭 처리
-            RemoveMatches(matched);
-            StartCoroutine(HandleBoardAfterMatchCoroutine());
-        }
-        else
-        {
-            //매칭 실패 시 원래대로 되돌림
-            a.SetPosition(aX, aY);
-            b.SetPosition(bX, bY);
-
-            allBlocks[aX, aY] = a;
-            allBlocks[bX, bY] = b;
-        }
-
-        a.Highlight(false);
-        b.Highlight(false);
-        */
     }
 
     private List<Block> FindMatches()
@@ -198,11 +230,10 @@ public class BoardManager : MonoBehaviour
     {
         foreach (Block b in matched)
         {
-            if (b == null) continue;
+            if (b == null || b.gameObject == null) continue;
 
             if (allBlocks[b.x, b.y] == b)
                 allBlocks[b.x, b.y] = null;
-
             Destroy(b.gameObject);
         }
     }
@@ -244,7 +275,9 @@ public class BoardManager : MonoBehaviour
                     int index = Random.Range(0, blockPrefabs.Length);
                     GameObject prefab = blockPrefabs[index];
 
-                    GameObject newBlockObj = Instantiate(prefab, new Vector2(x, y + 1), Quaternion.identity, boardHolder);
+                    float spawnHeight = height + 2f;
+                    Vector2 spawnPos = new Vector2(x * (1 + spacing), spawnHeight * (1 + spacing));
+                    GameObject newBlockObj = Instantiate(prefab, spawnPos, Quaternion.identity, boardHolder);
                     Block newBlock = newBlockObj.GetComponent<Block>();
                     newBlock.type = (BlockType)index;
                     newBlock.SetPosition(x, y);
@@ -257,17 +290,58 @@ public class BoardManager : MonoBehaviour
 
     private IEnumerator HandleBoardAfterMatchCoroutine()
     {
+        isProcessing = true;
+
         DropBlocks();
         FillEmptySpaces();
 
-        yield return null;
+        yield return WaitUntilAllBlocksStopped();
 
         //연쇄 매칭 탐지
         List<Block> nextMatch = FindMatches();
         if (nextMatch.Count > 0)
         {
             RemoveMatches(nextMatch);
+            yield return new WaitForSeconds(0.1f);
             yield return StartCoroutine(HandleBoardAfterMatchCoroutine());
         }
+
+        isProcessing = false;
+    }
+
+    private IEnumerator WaitUntilAllBlocksStopped()
+    {
+        bool anyMoving;
+        do
+        {
+            anyMoving = false;
+            foreach (Block b in allBlocks)
+            {
+                if (b != null && (Vector2)b.transform.position != new Vector2(b.x * (1 + spacing), b.y * (1 + spacing)))
+                {
+                    anyMoving = true;
+                    break;
+                }
+            }
+            yield return null;
+        } while (anyMoving);
+    }
+
+    public bool IsInside(int x, int y)
+    {
+        return x >= 0 && x < width && y >= 0 && y < height;
+    }
+
+    public Block GetBlock(int x, int y)
+    {
+        return allBlocks[x, y];
+    }
+
+    public void RequestSwap(Block a, Block b)
+    {
+        if (!IsAdjacent(a, b)) return;
+
+        isProcessing = true;
+        StartCoroutine(SwapAndCheck(a, b));
     }
 }
