@@ -228,6 +228,10 @@ public class BoardManager : MonoBehaviour
 
     private void RemoveMatches(List<Block> matched)
     {
+        if (matched == null || matched.Count == 0) return;
+
+        GameManager.Instance.AddScore(matched.Count);
+
         foreach (Block b in matched)
         {
             if (b == null || b.gameObject == null) continue;
@@ -305,7 +309,10 @@ public class BoardManager : MonoBehaviour
             yield return new WaitForSeconds(0.1f);
             yield return StartCoroutine(HandleBoardAfterMatchCoroutine());
         }
-
+        else
+        {
+            GameManager.Instance.ResetCombo();
+        }
         isProcessing = false;
     }
 
